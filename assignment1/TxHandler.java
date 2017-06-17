@@ -1,3 +1,6 @@
+import java.security.PublicKey;
+import java.util.ArrayList;
+
 public class TxHandler {
 
     /**
@@ -5,10 +8,11 @@ public class TxHandler {
      * {@code utxoPool}. This should make a copy of utxoPool by using the UTXOPool(UTXOPool uPool)
      * constructor.
      */
+
+    private UTXOPool utxoPool = null;
     public TxHandler(UTXOPool utxoPool) {
         // IMPLEMENT THIS
-
-        
+        this.utxoPool = new UTXOPool(utxoPool);
     }
 
     /**
@@ -22,6 +26,53 @@ public class TxHandler {
      */
     public boolean isValidTx(Transaction tx) {
         // IMPLEMENT THIS
+
+        ArrayList<Transaction.Input> txInputs = tx.getInputs();
+        ArrayList<Transaction.Output> txOutputs = tx.getOutputs();
+        
+        Transaction.Input txInput = null;
+        Transaction.Output txOutput = null;
+
+        double totalInputValue = 0;
+        double totalOutputValue = 0;
+
+        // (1) For each output, check if it is in current utxoPool
+        for(int index=0; index < txOutputs.size(); index++) {
+          txOutput = txOutputs.get(index);
+          
+          // (4) Ensure all output values are non-negative
+          if(txOutput.value < 0) return false;
+          
+          totalOutputValue += txOutput.value;
+        }
+        
+        // (2) Check tx inputs are valid
+        ArrayList<UTXO> utxoSeen = new ArrayList<UTXO>();
+        
+        for(int index=0; index < tx.numInputs(); index++) {
+          txInput = txInputs.get(index);
+          
+          // I need the public key from the previous transaction
+          // Where can I find it? In the UTXOPool
+          // Construct the UTXO, then query utxopool
+          UTXO prevUtxo = new UTXO(txInput.prevTxHash, txInput.outputIndex);
+          
+          if(!this.utxoPool.contains(prevUtxo)) return false;
+          
+          Transaction.Output prevOutput = this.utxoPool.getTxOutput(prevUtxo);
+          
+          if(!Crypto.verifySignature(prevOutput.address, tx.getRawDataToSign(index), txInput.signature)) return false;
+        
+          // (3) Check if prevUtxo has already been processed
+          if(utxoSeen.contains(prevUtxo)) return false;
+        
+          // Add every input's UTXO into the seen list
+          utxoSeen.add(prevUtxo);
+          
+          totalInputValue += prevOutput.value;
+        }
+        
+        return (totalInputValue >= totalOutputValue);
     }
 
     /**
@@ -31,6 +82,52 @@ public class TxHandler {
      */
     public Transaction[] handleTxs(Transaction[] possibleTxs) {
         // IMPLEMENT THIS
+        
+        ArrayList<Transaction> validTxs = new ArrayList<Transaction>();
+        
+        Transaction currentTx = null;
+        
+        for(int q=0; q < possibleTxs.length; q++) {
+        
+          currentTx = possibleTxs[q];
+          
+          if(isValidTx(currentTx)) {
+          
+            validTxs.add(currentTx);
+          
+            // If transaction is valid, UTXO pool must be updated.
+            // Destroy the input UTXOs and add the output UTXOs
+            ArrayList<Transaction.Input> txInputs = currentTx.getInputs();
+            Transaction.Input txInput = null;
+            
+            ArrayList<Transaction.Output> txOutputs = currentTx.getOutputs();
+            Transaction.Output txOutput = null;
+            
+            for(int index=0; index < txInputs.size(); index++) {
+              txInput = txInputs.get(index);
+              UTXO prevUtxo = new UTXO(txInput.prevTxHash, txInput.outputIndex);
+              this.utxoPool.removeUTXO(prevUtxo);
+            }
+            
+            for(int index=0; index < txOutputs.size(); index++) {
+              txOutput = txOutputs.get(index);
+              UTXO newUtxo = new UTXO(currentTx.getHash(), index);
+              this.utxoPool.addUTXO(newUtxo, txOutput);
+            } 
+            
+          }
+        }
+        
+        Transaction[] valids = new Transaction[validTxs.size()];
+        valids = validTxs.toArray(valids);
+        
+        return valids;    
     }
 
+    /*
+        To remove
+     */
+    public static void main(String[] args) {
+      System.out.println("Going good");
+    }
 }
